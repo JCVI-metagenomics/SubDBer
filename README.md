@@ -5,7 +5,7 @@ Flexible taxonomy-based subsampling of sequence database for efficient and focus
 
 Version: 0.1.0
 
-Authors: Qiyun Zhu (<qzhu@jcvi.org>)
+Author: Qiyun Zhu (<qzhu@jcvi.org>)
 
 Affiliation: J. Craig Venter Institute, La Jolla, CA, USA
 
