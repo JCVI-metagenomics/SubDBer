@@ -18,14 +18,14 @@ print '\n'.join((
 	'subDBer.py',
 	'Author: Qiyun Zhu (qzhu@jcvi.org)',
 	'Affiliation: J. Craig Venter Institute',
-	'Last updated: May 4, 2015',
+	'Last updated: Oct. 4, 2015',
 	''
 	))
 
 if len(sys.argv) == 1:
 	print '\n'.join((
 		'Usage:',
-		'  python subDBer.py [-in dbname] [-out dbname] [-outfmt fasta/blast/gilist/alias] [-title dbtitle] [-within taxids] [-exclude taxids] [-rank rank] [-size number] [-keep taxids]',
+		'  python subDBer.py [-in dbname] [-out dbname] [-outfmt fasta/blast/gilist/alias] [-title dbtitle] [-within taxids] [-exclude taxids] [-rank rank] [-size number] [-keep taxids] [-prefer auto] [-quiet] [-help]',
 		'',
 		'Example:',
 		'  python subDBer.py -in nt -out sub_nt -outfmt blast -within 2 -exclude 1117 -rank genus -size 1 -keep 816,838,1263',
@@ -67,6 +67,9 @@ helpinfo = '\n'.join((
 	'  -size <number of taxa>',
 	'    Up to this number of taxa will be sampled from each taxonomic group as defined by -rank. Default: 1.',
 	'    Note: this sampling process is not random. The rule is that taxa with more synonyms recorded in the database have higher priority to be sampled.',
+	'  -prefer <preferred TaxIDs>',
+	'    A file containing one TaxID per line. These organisms will be preferred during the subsampling process.',
+	'    If the value is "auto", the program will refer to the standard representative genome list at the NCBI server.',
 	'  -quiet',
 	'    SubDBer will complete all procedures automatically (non-interactively).',
 	'  -help',
@@ -79,7 +82,7 @@ helpinfo = '\n'.join((
 
 (indb, outdb) = ('', '')
 (rank, size) = ('', 1)
-(within, exclude, keep) = ([], [], [])
+(within, exclude, keep, prefer) = ([], [], [], '')
 (title, dbtype) = ('untitled', 'nucl')
 outfmt = 'fasta'
 quiet = 0
@@ -125,6 +128,7 @@ for i in range(1, args):
 		elif arg == '-within': within = val.split(',')
 		elif arg == '-exclude': exclude = val.split(',')
 		elif arg == '-keep': keep = val.split(',')
+		elif arg == '-prefer': prefer = val
 		elif arg == '-rank': rank = val
 		elif arg == '-size': size = int(val)
 	else:
@@ -160,7 +164,7 @@ else:
 		print 'The database is successfully downloaded and extracted.'
 		if not quiet: raw_input('Press any key to continue...')
 	else:
-		sys.exit('Failed to retrieve the database.')
+		sys.exit('Error: Failed to retrieve the database.')
 
 
 ## Step 2: Read the NCBI taxonomy database ##
@@ -209,7 +213,54 @@ if exclude:
 	print '  ' + str(excluded) + ' taxa under ' + ', '.join(exclude_names) + ' are excluded, remaining ' + str(len(taxdumps)) + ' taxa.'
 
 
-## Step 3: Read a designated BLAST database ##
+## Step 3: Download the representative genome list ##
+
+lprefer = {}
+if prefer == 'auto':
+	print 'SubDBer will refer to the NCBI representative genome list for preferred genomes.'
+	preferfile = 'representative_genomes.txt'
+	if os.path.isfile(preferfile):
+		print 'The representative genomes list is present in the current directory. subDBer will use it.'
+		if not quiet: raw_input('Press any key to continue...')
+	else:
+		print 'Downloading representative genome list...',
+		sys.stdout.flush()
+		try:
+			urllib.urlretrieve ('http://www.ncbi.nlm.nih.gov/genomes/Genome2BE/genome2srv.cgi?action=refgenomes&download=on', preferfile)
+			print 'done.'
+		except:
+			print 'failed.'
+	if os.path.isfile(preferfile):
+		print 'Reading representative genome list...'
+		name2id = {}
+		for i in taxdumps:
+			if not taxdumps[i].has_key('name'): continue
+			name = taxdumps[i]['name']
+			if not name2id.has_key(name):
+				name2id[name] = i
+		fprefer = open(preferfile, 'r')
+		for line in fprefer:
+			if line[0] == '#': continue
+			line = line.rstrip('\r\n')
+			if not line: continue
+			name = line.split('\t')[2]
+			if name2id.has_key(name):
+				lprefer[name2id[name]] = 1
+		fprefer.close()
+		print '  ' + str(len(lprefer)) + ' representative genomes read.'
+elif prefer:
+	if not os.path.isfile(prefer):
+		sys.exit('Error: The preferred genome list does not exist.')
+	print 'Reading preferred genome list...'
+	fprefer = open(prefer, 'r')
+	for line in fprefer:
+		line = line.rstrip('\r\n')
+		lprefer[line] = 1
+	fprefer.close()
+	print '  ' + str(len(lprefer)) + ' preferred genomes read.'
+
+
+## Step 4: Read a designated BLAST database ##
 
 print "Verifying input BLAST database..."
 p = subprocess.Popen('blastdbcmd -db ' + indb + ' -info', stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True)
@@ -219,14 +270,14 @@ if 'BLAST Database error: No alias or index' in out:
 	print 'Error: The input BLAST database ' + indb + ' is missing or invalid.'
 	p = subprocess.Popen('update_blastdb.pl --showall', stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True)
 	out = p.stdout.read()
-	if 'command not found' in out: sys.exit()
+	if 'command not found' in out: sys.exit('Error: update_blastdb.pl not available. Check if you have ncbi-blast+ correctly installed.')
 	ncbi_dbs = []
 	for line in out.split('\n'):
 		if line[:9] == 'Connected': continue
 		ncbi_dbs.append(line.rstrip())
 	indb = indb[indb.rfind('/')+1:]
-	if not indb in ncbi_dbs: sys.exit()
-	print 'Database "' + indb + '" is available from the NCBI server. SubDBer will download it to the current directory.'
+	if not indb in ncbi_dbs: sys.exit('Error: Database ' + indb + ' is not available at the NCBI server either.')
+	print 'Database ' + indb + ' is available from the NCBI server. SubDBer will download it to the current directory.'
 	if not quiet: raw_input('Press any key to continue...')
 	p = subprocess.call('update_blastdb.pl --decompress ' + indb, shell=True)
 	print "Verifying downloaded BLAST database..."
@@ -247,7 +298,7 @@ if ' ' in title: title = '"' + title + '"'
 print "Reading input BLAST database..."
 allrecs = 0
 p = subprocess.Popen('blastdbcmd -db ' + indb + ' -entry all -outfmt \"%o %g %a %T %l\"', stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True)
-for line in p.stdout.readlines():
+for line in p.stdout:
 	line = line.rstrip('\r\n')
 	if not line: continue
 	allrecs += 1
@@ -265,7 +316,7 @@ p.stdout.close()
 print '  ' + str(len(recs)) + ' of all ' + str(allrecs) + ' sequences belonging to ' + str(len(taxa)) + ' taxa are retained.'
 
 
-## Step 4: Choose a subset of representative taxa ##
+## Step 5: Choose a subset of representative taxa ##
 
 if rank:
 
@@ -304,15 +355,23 @@ if rank:
 	print '  A list of ' + rankppl + ' included in the BLAST database is saved as ' + rank + '_list.txt.'
 
 	for gid in groups:
+		nowsize = 0
+		# Keep preferred taxons, if any.
+		if lprefer:
+			for id in groups[gid]:
+				if lprefer.has_key(id):
+					taxa[id]['in'] = 1
+					nowsize += 1
+					if nowsize >= size: break
+		if nowsize >= size: continue
+		# The 'representativity' is measured by the number of names a taxon has received from researchers.
 		names = {}
 		for id in groups[gid]:
 			names[id] = taxdumps[id]['names']
-		nowsize = 0
 		for (id, number) in sorted(names.items(), reverse=True, key=lambda x: x[1]):
-			if nowsize >= size: break
 			taxa[id]['in'] = 1
 			nowsize += 1
-			# The 'representativity' is measured by the number of names a taxon has received from researchers.
+			if nowsize >= size: break
 	if size == 1: print '  Up to ' + str(size) + ' organism from each ' + rank + ' is sampled.'
 	else: print '  Up to ' + str(size) + ' organisms from each ' + rank + ' are sampled.'
 
@@ -373,7 +432,7 @@ fout.close()
 print '  A list of subsampled sequences is saved as selected_sequences.txt.'
 
 
-## Step 5: Create new database ##
+## Step 6: Create new database ##
 
 print "SubDBer is ready to build a new database based on the subsampled sequences."
 if not quiet: raw_input('Press any key to continue...')

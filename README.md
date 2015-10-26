@@ -3,13 +3,13 @@ SubDBer
 
 Flexible taxonomy-based subsampling of sequence database for efficient and focused metagenomic analyses
 
-Version: 0.1.0
+Version: 0.1.1
 
 Author: Qiyun Zhu (<qzhu@jcvi.org>)
 
 Affiliation: J. Craig Venter Institute, La Jolla, CA, USA
 
-Last updated: May 4, 2015
+Last updated: Oct. 4, 2015
 
 License: [BSD 2-clause](http://opensource.org/licenses/BSD-2-Clause).
 
